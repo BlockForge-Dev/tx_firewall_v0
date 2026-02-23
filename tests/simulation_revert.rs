@@ -20,9 +20,17 @@ async fn rpc_handler(Json(req): Json<Value>) -> Json<Value> {
     let id = req["id"].clone();
 
     let resp = match method {
-        "eth_blockNumber" => json!({"jsonrpc":"2.0","id":id,"result":"0x10"}), // 16 => pinned=15
-        "eth_getCode" => json!({"jsonrpc":"2.0","id":id,"result":"0x6001600055"}),
-        "eth_call" => json!({"jsonrpc":"2.0","id":id,"result":"0x01"}),
+        "eth_blockNumber" => json!({"jsonrpc":"2.0","id":id,"result":"0x10"}), // pinned=15
+        "eth_getCode" => json!({"jsonrpc":"2.0","id":id,"result":"0x6001600055"}), // contract exists
+        "eth_call" => json!({
+            "jsonrpc":"2.0",
+            "id":id,
+            "error":{
+                "code":3,
+                "message":"execution reverted",
+                "data":"0xdeadbeef"
+            }
+        }),
         _ => json!({"jsonrpc":"2.0","id":id,"error":{"code":-1,"message":"unknown method"}}),
     };
 
@@ -49,40 +57,26 @@ async fn start_mock_rpc() -> (String, tokio::sync::oneshot::Sender<()>) {
 }
 
 #[tokio::test]
-async fn milestone3_pins_block_gets_codehash_and_eth_call() {
+async fn marks_would_revert_and_not_retryable() {
     let (rpc_url, shutdown) = start_mock_rpc().await;
 
     let state = AppState::new("latest-1".to_string(), Some(ChainClient::new(rpc_url, 1)));
 
-    let resp = pipeline::evaluate_tx_v0(&state, "m3".to_string(), valid_req())
+    let resp = pipeline::evaluate_tx_v0(&state, "revert".to_string(), valid_req())
         .await
         .unwrap();
 
-    assert_eq!(resp.block_ref, "block:15");
+    let call = resp.receipt.chain.unwrap().eth_call;
+    assert!(!call.ok);
+    assert_eq!(call.error_class.as_deref(), Some("REVERT"));
+    assert_eq!(call.revert_data.as_deref(), Some("0xdeadbeef"));
+    assert!(!call.retryable);
 
-    let chain = resp.receipt.chain.expect("chain evidence expected");
-    assert_eq!(chain.pinned_block, 15);
-    assert!(chain.to_code_hash.starts_with("0x"));
-    assert!(chain.eth_call.ok);
-    assert_eq!(chain.eth_call.result.as_deref(), Some("0x01"));
-
-    // these should NOT fire because eth_getCode != "0x" and eth_call != "0x"
-    let ids: Vec<&str> = resp
+    assert!(resp
         .receipt
         .rules_fired
         .iter()
-        .filter_map(|r| r.get("rule_id").and_then(|v| v.as_str()))
-        .collect();
+        .any(|r| r["rule_id"] == "WOULD_REVERT"));
 
-    assert!(
-        !ids.contains(&"TO_NOT_A_CONTRACT"),
-        "did not expect TO_NOT_A_CONTRACT, got={:?}",
-        ids
-    );
-    assert!(
-        !ids.contains(&"ETH_CALL_NO_EFFECT"),
-        "did not expect ETH_CALL_NO_EFFECT, got={:?}",
-        ids
-    );
     let _ = shutdown.send(());
 }

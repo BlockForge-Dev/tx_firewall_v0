@@ -52,10 +52,7 @@ async fn start_mock_rpc() -> (String, tokio::sync::oneshot::Sender<()>) {
 async fn adds_eth_call_no_effect_when_to_is_not_contract_and_result_empty() {
     let (rpc_url, shutdown) = start_mock_rpc().await;
 
-    let state = AppState {
-        default_block_ref: "latest-1".to_string(),
-        chain: Some(ChainClient::new(rpc_url, 1)),
-    };
+    let state = AppState::new("latest-1".to_string(), Some(ChainClient::new(rpc_url, 1)));
 
     let resp = pipeline::evaluate_tx_v0(&state, "no-effect".to_string(), valid_req())
         .await
@@ -64,10 +61,37 @@ async fn adds_eth_call_no_effect_when_to_is_not_contract_and_result_empty() {
     // Should be pinned
     assert_eq!(resp.block_ref, "block:15");
 
-    // Should fire both rules, in this order
-    assert_eq!(resp.receipt.rules_fired.len(), 2);
-    assert_eq!(resp.receipt.rules_fired[0]["rule_id"], "TO_NOT_A_CONTRACT");
-    assert_eq!(resp.receipt.rules_fired[1]["rule_id"], "ETH_CALL_NO_EFFECT");
+    // Collect rule ids
+    let ids: Vec<&str> = resp
+        .receipt
+        .rules_fired
+        .iter()
+        .filter_map(|r| r.get("rule_id").and_then(|v| v.as_str()))
+        .collect();
+
+    let pos_to_not_contract = ids.iter().position(|&x| x == "TO_NOT_A_CONTRACT");
+    let pos_no_effect = ids.iter().position(|&x| x == "ETH_CALL_NO_EFFECT");
+
+    assert!(
+        pos_to_not_contract.is_some(),
+        "TO_NOT_A_CONTRACT missing. got={:?}",
+        ids
+    );
+    assert!(
+        pos_no_effect.is_some(),
+        "ETH_CALL_NO_EFFECT missing. got={:?}",
+        ids
+    );
+
+    assert!(
+        pos_to_not_contract.unwrap() < pos_no_effect.unwrap(),
+        "Expected TO_NOT_A_CONTRACT before ETH_CALL_NO_EFFECT. got={:?}",
+        ids
+    );
+
+    // Optional: if you want to ensure these are the *first two* rules
+    assert_eq!(ids[0], "TO_NOT_A_CONTRACT", "got={:?}", ids);
+    assert_eq!(ids[1], "ETH_CALL_NO_EFFECT", "got={:?}", ids);
 
     let _ = shutdown.send(());
 }

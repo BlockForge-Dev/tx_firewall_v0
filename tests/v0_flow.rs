@@ -2,14 +2,13 @@ use axum::http::StatusCode;
 
 use tx_firewall_v0::{
     domain::{Decision, EvaluateTxRequest},
-    pipeline, AppState,
+    pipeline,
+    safety::FailClosedMode,
+    AppState,
 };
 
 fn state() -> AppState {
-    AppState {
-        default_block_ref: "latest-1".to_string(),
-        chain: None,
-    }
+    AppState::new("latest-1".to_string(), None)
 }
 
 fn valid_req() -> EvaluateTxRequest {
@@ -40,16 +39,38 @@ async fn v0_happy_path_returns_warn_and_placeholders() {
 
     assert!(resp.receipt.chain.is_none()); // ✅ still v0 path
 
-    assert!(resp.receipt.asset_deltas.is_empty());
-    assert!(resp.receipt.permissions.is_empty());
+    assert!(resp.receipt.permissions_changed.is_empty());
+    assert!(resp.receipt.transfers.is_empty());
+
     assert!(resp.receipt.call_path.is_empty());
-    assert!(resp.receipt.rules_fired.is_empty());
+    assert!(resp
+        .receipt
+        .rules_fired
+        .iter()
+        .any(|r| r["rule_id"] == "PARTIAL_ANALYSIS_FAIL_CLOSED"));
 
     assert_eq!(resp.receipt.uncertainties.len(), 1);
     assert_eq!(
         resp.receipt.uncertainties[0].code,
         "SIMULATION_NOT_IMPLEMENTED"
     );
+}
+
+#[tokio::test]
+async fn v0_placeholder_respects_fail_closed_block_mode() {
+    let mut st = state();
+    st.fail_closed_mode = FailClosedMode::Block;
+
+    let resp = pipeline::evaluate_tx_v0(&st, "block-mode".to_string(), valid_req())
+        .await
+        .expect("expected Ok response");
+
+    assert!(matches!(resp.decision, Decision::Block));
+    assert!(resp
+        .receipt
+        .rules_fired
+        .iter()
+        .any(|r| r["rule_id"] == "PARTIAL_ANALYSIS_FAIL_CLOSED"));
 }
 
 #[tokio::test]
