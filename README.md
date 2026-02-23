@@ -1,5 +1,7 @@
 # tx_firewall_v0
 
+[![CI](https://github.com/BlockForge-Dev/tx_firewall_v0/actions/workflows/ci.yml/badge.svg)](https://github.com/BlockForge-Dev/tx_firewall_v0/actions/workflows/ci.yml)
+
 Rust service that simulates and risk-scores EVM transactions before signing.
 
 It takes a proposed transaction, runs deterministic evaluation with RPC simulation and trace analysis, and returns a decision with evidence:
@@ -11,6 +13,7 @@ It takes a proposed transaction, runs deterministic evaluation with RPC simulati
 - Language and runtime: Rust + Tokio + Axum.
 - Production focus: rate limiting, simulation budgets, fail-closed behavior, audit logging, SLO signals, admin control plane.
 - Architecture style: modular pipeline with deterministic IDs, structured evidence, and observability-first operations.
+- Delivery quality: automated CI on push/PR (format, build, lint, tests on Linux and Windows).
 
 ## Why This Project Exists
 
